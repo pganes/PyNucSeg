@@ -9,5 +9,5 @@ pip install pynucseg
 ## Import
 
 ```python
-from samion import ReferenceImage
+from pynucseg import ReferenceImage
 ```
