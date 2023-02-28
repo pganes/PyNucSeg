@@ -4,7 +4,7 @@ A python package for segmentation of fluorescent nucleus, and measure the area o
 ## Installation
 Run the follwing to install:
 ```python
-pip install quantify-nucleus
+pip install samion
 ```
 ## Import
 
