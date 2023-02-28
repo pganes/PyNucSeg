@@ -9,5 +9,5 @@ pip install samion
 ## Import
 
 ```python
-from quantify_nucleus import ReferenceImage
+from samion import ReferenceImage
 ```
