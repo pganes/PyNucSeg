@@ -132,3 +132,4 @@ dmypy.json
 # custom
 notes.txt
 .conda/
+src/pynucseg/tests.ipynb

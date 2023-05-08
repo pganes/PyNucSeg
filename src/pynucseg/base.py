@@ -89,7 +89,7 @@ class ReferenceImage:
         print(list(self.image.keys()))
         return 
         
-    def view_on_napari(self, return_viewer:bool=False)->napari.Viewer:
+    def view_on_napari(self,pixel_length_um=0.1, return_viewer:bool=False)->napari.Viewer:
         """Displays the availlable images in napari viewer.
 
         If no image is found, no viewer object will be returned.
@@ -111,10 +111,12 @@ class ReferenceImage:
             viewer = napari.Viewer()
             for image_name,image in self.image.items():
                 if 'label' in image_name:
-                    viewer.add_labels(image, name=image_name)
+                    # viewer.add_labels(image, name=image_name))
+                    viewer.add_labels(image, name=image_name,scale=(pixel_length_um,pixel_length_um))
                 else:
-                    viewer.add_image(image, name=image_name)
-                    
+                    viewer.add_image(image, name=image_name,scale=(pixel_length_um,pixel_length_um))
+            viewer.scale_bar.visible = True
+            viewer.scale_bar.unit="um"       
             if return_viewer:
                 return viewer
             else:
@@ -306,7 +308,26 @@ class ReferenceImage:
             return self.image['boundary_filtered_labels'], self.closedcontours,\
                 self.n_closedcontours
         
-    
+    def filterout_nuclei_by_area(self,
+                                 a_pixel_area:float=0.01,
+                                 area_threshold:list = [50,150]):
+        # Store area of each nucleus and mean intensity per pixel
+        area_per_nuclus = np.zeros((self.n_closedcontours,2))  
+        for i, label in enumerate(self.closedcontours):
+            mask = self.image['labels'] == label+1
+            area_per_nuclus[i,0] = label
+            area_per_nuclus[i,1] = len(np.where(mask==True)[0]) # area in terms of pixel
+
+        # convert unit of area to um^2
+        area_per_nuclus[:,1] = area_per_nuclus[:,1] * a_pixel_area
+        
+        # remove the very small and very big nuclei
+        true_nuclei_ind = np.where((area_per_nuclus[:,1] >= area_threshold[0]) &
+                               (area_per_nuclus[:,1] <= area_threshold[1]))[0]
+        
+        # 
+
+
     def get_cell_info(
             self,
             probe_names:list[str]=["PolII"],
