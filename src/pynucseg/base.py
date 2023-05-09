@@ -7,6 +7,7 @@ import napari
 from scipy.ndimage import median_filter
 from skimage import measure
 import numpy as np
+import pandas as pd
 
 from stardist.models import StarDist2D
 from csbdeep.utils import normalize
@@ -263,76 +264,98 @@ class ReferenceImage:
             contours.append(measure.find_contours(mask, 0.5)[0])
         return contours
     
-    def remove_boundary_cells(self,return_results=False):
+    def filter_by_boundary_n_area(self,
+                              a_pixel_area:float = 0.01,
+                              area_threshold:list=[80,200]):
         """Removed the nuclear labels that are at the boundary 
-        of the field of view.
+        of the field of view and are not within the `area_threshold`.
 
-        This method adds `image['boundary_filtered_labels']` and the  following
-        attributes in the self object.
+        This method adds `image['boundary_filtered_labels']`,  
+        `image['area_filtered_labels']` the  following attributes in
+        the self object.
         `n_contours`: Number of nucleus detected
         `is_closed` : Boolean mask whether each detected nucleus is 
             at the boundary of field of view or not.
         `closedcontours`: Contains index of labels that are not at
             the boundary.
         `n_closedcontours`: Number of nuclear mask that does not lie
-            at the boundary. 
+            at the boundary.
+        `n_true_nucleus`: Number of nucleus those are not in the boundary
+            and pass the area_threshold.
 
         Parameters
         ----------
-        return_results : bool, optional
-            Whether to return tuple of length 3 containing label image,
-            closedcontours and n_closedcontours, by default False
+        a_pixel_area   : float, optional
+            Area of a unit pixel in um^2. Default to 0.01 um^2.
+        area_threshold: list, optional
+            List containing the minimum and maximum area that each nucleus 
+            can have. Default area_min = 80 um^2 and area_max = 200 um^2
 
         Returns
         -------
-        tuple
-            (label_image, closedcontours and n_closedcontours)
+        None
+            Save the results inplace
         """
+         # count number of contours i.e. original cell detected by stardist
         self.n_contours = len(self.contours)
         is_closed = np.full((self.n_contours,),fill_value=False)
         for i,contour in enumerate(self.contours):
             is_closed[i] = np.allclose(contour[0], contour[-1])
 
+        # store boolean array whether each contour is complete or not
         self.is_closed = is_closed
+        # store index of closed contours
         self.closedcontours = np.where(self.is_closed==True)[0]
+        # store number of closed contours
         self.n_closedcontours = len(self.closedcontours)
 
+        # boundary filtered nucleus or contours
+        # boundary filtered means contours that are complete or
+        # nuclei those do not touch boundary
+        bdryFiltered_labels_IDs = np.zeros((self.n_closedcontours,1))  
+        bdryFiltered_area = np.zeros((self.n_closedcontours,1))
+
         # create new labels for closed contours only
-        filtared_labels = np.zeros_like(self.image['labels'],dtype=int)
+        bdryFiltered_labels = np.zeros_like(self.image['labels'],dtype=int)
+        areaFiltered_labels = np.zeros_like(self.image['labels'],dtype=int)
+
+        true_nuclei_index = [] # store the true cells index in a list
+
         for i,closedcontour in enumerate(self.closedcontours):
             mask = self.image['labels'] == closedcontour+1
-            filtared_labels[mask] = i+1
+            bdryFiltered_labels[mask] = i+1
 
-        self.image['boundary_filtered_labels'] = filtared_labels
-        if return_results:
-            return self.image['boundary_filtered_labels'], self.closedcontours,\
-                self.n_closedcontours
-        
-    def filterout_nuclei_by_area(self,
-                                 a_pixel_area:float=0.01,
-                                 area_threshold:list = [50,150]):
-        # Store area of each nucleus and mean intensity per pixel
-        area_per_nuclus = np.zeros((self.n_closedcontours,2))  
-        for i, label in enumerate(self.closedcontours):
-            mask = self.image['labels'] == label+1
-            area_per_nuclus[i,0] = label
-            area_per_nuclus[i,1] = len(np.where(mask==True)[0]) # area in terms of pixel
+            bdryFiltered_labels_IDs[i] = closedcontour
+            bdryFiltered_area[i] = len(np.where(mask==True)[0]) # area in terms of pixel
 
-        # convert unit of area to um^2
-        area_per_nuclus[:,1] = area_per_nuclus[:,1] * a_pixel_area
-        
-        # remove the very small and very big nuclei
-        true_nuclei_ind = np.where((area_per_nuclus[:,1] >= area_threshold[0]) &
-                               (area_per_nuclus[:,1] <= area_threshold[1]))[0]
-        
-        # 
+            area_in_um2 = bdryFiltered_area[i]*a_pixel_area
+            
+            if (area_in_um2 > area_threshold[0]) & (area_in_um2 < area_threshold[1]):
+                # fill the values in the empty array
+                areaFiltered_labels[mask] = i+1
 
+                # append the current cell in the true_cell index
+                true_nuclei_index.append(i)
+
+        area_n_bdry_filtered_area = bdryFiltered_area[true_nuclei_index]
+        self.n_true_nucleus = len(true_nuclei_index)
+        self.true_nucleus_index = true_nuclei_index
+        self.seg = {
+            'area_n_bdry_filtered_IDs': bdryFiltered_labels_IDs[true_nuclei_index],
+            'area_n_bdry_filtered_area': area_n_bdry_filtered_area,
+            'area_n_bdry_filtered_area_in_um2': area_n_bdry_filtered_area*a_pixel_area
+        }
+
+        self.image['boundary_filtered_labels'] = bdryFiltered_labels
+        self.image['area_filtered_labels'] = areaFiltered_labels
+        return 
 
     def get_cell_info(
             self,
             probe_names:list[str]=["PolII"],
-            return_results:bool=False,
-            a_pixel_area:float=0.01):
+            a_pixel_area:float=0.01,
+            area_threshold:list=[80,200],
+            return_results:bool=False):
         """Adds `area_n_ADU` attribute that contains background subtracted
         mean intensity and the area of each nucleus and another attrubute
         `backgrounADU` which contains mean background ADU count per pixel.
@@ -341,12 +364,16 @@ class ReferenceImage:
         ----------
         probe_names : list, optional
             List of string containing name of probes, by default ["PolII"]
-        return_results : bool, optional
-            Whether to through the result in output, by default False
         a_pixel_area : float, optional
             Physical area of a pixel in um^2, by default 0.01 um^2. If 
             pixel size is other than 0.1 um, adjust this parameter 
             accordingly.
+        area_threshold: list, optional
+            List containing the minimum and maximum area in um^2 that each 
+            nucleus can have. Default area_min is 80 um^2 and area_max is 
+            200 um^2
+        return_results : bool, optional
+            Whether to through the result in output, by default False
 
         Returns
         -------
@@ -354,46 +381,45 @@ class ReferenceImage:
             First column is area and second and third columns ared added
             for each nuclei to store mean ADU count per pixel.
         """
-        # remove boundary nucleus if it was not done previously
-        if not hasattr(self, "closedcontours"):
-            # adds attributes closedcontours, n_closedcontours, etc
-            ReferenceImage.remove_boundary_cells(self, return_results=False)
+        # remove boundary nucleus and filter nucleus by size 
+        ReferenceImage.filter_by_boundary_n_area(self,
+                                                 a_pixel_area=a_pixel_area,
+                                                 area_threshold=area_threshold)
         
-        if not hasattr(self,"backgroun_mask"):
+        # get the mask for background if not done previously 
+        if not hasattr(self,"background_mask"):
             ReferenceImage.get_background_mask(self)
+        
+        # Store mean intensity per pixel per nucleus
+        ADU_counts = np.zeros(
+            (len(self.seg['area_n_bdry_filtered_IDs']),len(probe_names)))  
 
-        # Store area of each nucleus and mean intensity per pixel
-        area_n_ADU = np.zeros((self.n_closedcontours,len(probe_names)+1))  
-        for i, label in enumerate(self.closedcontours):
+        for i, label in enumerate(self.seg['area_n_bdry_filtered_IDs']):
             mask = self.image['labels'] == label+1
-            area_n_ADU[i,0] = len(np.where(mask==True)[0]) # area in terms of pixel
-
             for j,probe in enumerate(probe_names):
                 # mean intensity per pixel
-                area_n_ADU[i,j+1] = np.sum(self.image[probe][mask])/area_n_ADU[i,0]
+                ADU_counts[i,j] = np.sum(
+                    self.image[probe][mask])/self.seg['area_n_bdry_filtered_area'][i]
             
         # measure the mean background intensity and subtract it
-        backgroun_area_in_pxl = len(np.where(self.backgroun_mask==True)[0])
+        backgroun_area_in_pxl = len(np.where(self.background_mask==True)[0])
         mean_bg_allprobes = []
         for j,probe in enumerate(probe_names):
             mean_backgorund = np.sum(
-                self.image[probe][self.backgroun_mask])/backgroun_area_in_pxl
+                self.image[probe][self.background_mask])/backgroun_area_in_pxl
             
             # appen this value to a list
             mean_bg_allprobes.append(mean_backgorund)
 
             # subtract the background from cell intensities
-            area_n_ADU[:,j+1] = area_n_ADU[:,j+1] - mean_backgorund
+            ADU_counts[:,j] = ADU_counts[:,j] - mean_backgorund
 
-        # convert unit of area to um^2
-        area_n_ADU[:,0]  = area_n_ADU[:,0] * a_pixel_area
-        
         # store values inplace
-        self.area_n_ADU = area_n_ADU
+        self.ADU_counts = ADU_counts
         self.backgrounADU = mean_bg_allprobes
 
         if return_results:
-            return self.area_n_ADU
+            return self.ADU_counts
         else:
             return
         
@@ -415,13 +441,10 @@ class ReferenceImage:
         bg_mask = self.image['labels'] == 0
         background[bg_mask] = 1
         self.image['background_label'] = background
-        self.backgroun_mask = bg_mask
+        self.background_mask = bg_mask
         
         if return_result:
-            return self.image['background_label'], self.backgroun_mask
-
-    # def __str__(self):
-    #     return f"{self.field_of_view}"
+            return self.image['background_label'], self.background_mask
 
     def __repr__(self):
         return f'ReferenceImage({self.field_of_view})'
