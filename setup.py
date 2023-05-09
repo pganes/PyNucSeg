@@ -5,7 +5,7 @@ with open("README.md","r") as fh:
 
 setup(
     name='PyNucSeg',
-    version='0.0.7',
+    version='0.0.8',
     author="Ganesh Pandey",
     author_email="gpande3@uic.edu",
     description='Segment fluorescent nucleus, and measure the area, and the mean intensity per nucleus.',
