@@ -316,14 +316,14 @@ class ReferenceImage:
         bdryFiltered_area = np.zeros((self.n_closedcontours,1))
 
         # create new labels for closed contours only
-        bdryFiltered_labels = np.zeros_like(self.image['labels'],dtype=int)
-        areaFiltered_labels = np.zeros_like(self.image['labels'],dtype=int)
+        bdryFiltered_labels = np.zeros_like(self.image['labels'],dtype=np.uint8)
+        areaFiltered_labels = np.zeros_like(self.image['labels'],dtype=np.uint8)
 
         true_nuclei_index = [] # store the true cells index in a list
 
         for i,closedcontour in enumerate(self.closedcontours):
             mask = self.image['labels'] == closedcontour+1
-            bdryFiltered_labels[mask] = i+1
+            bdryFiltered_labels[mask] = closedcontour+1
 
             bdryFiltered_labels_IDs[i] = closedcontour
             bdryFiltered_area[i] = len(np.where(mask==True)[0]) # area in terms of pixel
@@ -332,14 +332,14 @@ class ReferenceImage:
             
             if (area_in_um2 > area_threshold[0]) & (area_in_um2 < area_threshold[1]):
                 # fill the values in the empty array
-                areaFiltered_labels[mask] = i+1
+                areaFiltered_labels[mask] = closedcontour+1
 
                 # append the current cell in the true_cell index
                 true_nuclei_index.append(i)
 
         area_n_bdry_filtered_area = bdryFiltered_area[true_nuclei_index]
         self.n_true_nucleus = len(true_nuclei_index)
-        self.true_nucleus_index = true_nuclei_index
+        self.true_nucleus = bdryFiltered_labels_IDs[true_nuclei_index]
         self.seg = {
             'area_n_bdry_filtered_IDs': bdryFiltered_labels_IDs[true_nuclei_index],
             'area_n_bdry_filtered_area': area_n_bdry_filtered_area,
@@ -437,7 +437,7 @@ class ReferenceImage:
         tuple
             (background_label_image, background_mask)
         """
-        background = np.zeros_like(self.image['labels'])
+        background = np.zeros_like(self.image['labels'],dtype=np.bool)
         bg_mask = self.image['labels'] == 0
         background[bg_mask] = 1
         self.image['background_label'] = background
